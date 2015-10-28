@@ -23,8 +23,8 @@ addons:
     - libelf-dev
     - libdw-dev
 after_success:
-    - travis-cargo --only beta doc-upload
-- travis-cargo coveralls --no-sudo
+  - travis-cargo --only beta doc-upload
+  - travis-cargo coveralls --no-sudo
 notifications:
   email:
     on_success: never
