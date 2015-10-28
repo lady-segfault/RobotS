@@ -2,6 +2,7 @@ sudo: false
 language: rust
 rust:
     - nightly
+    - beta
 matrix:
     allow_failures:
         - rust: nightly
