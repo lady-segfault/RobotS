@@ -22,6 +22,7 @@ pub enum Payload {
 }
 
 /// Struct used to send a `Payload` with its sender information.
+/// This is what is sent from an actor to another.
 pub struct Message {
     /// Contains the message payload.
     payload: Payload,
@@ -86,11 +87,16 @@ type ConsumerThread = (thread::JoinHandle<()>, Sender<()>);
 /// `handle_actor_message` is called.
 /// `ActorSystem::spawn_thread` allows to create simple threads that will handle `Actor`s messages.
 pub struct ActorSystem {
+    /// Container with all the Actors known by the ActorSystem.
     // TODO(gamazeps): Use an unordered container instead.
     // There is currently an issue with having an ActorRef as a Arc<Mutex<Actor + Eq + Hash>>.
     actors_table: Arc<Mutex<Vec<ActorRef>>>,
+    /// Queue of Actors with message to be handled.
     actors_queue: Arc<Mutex<VecDeque<ActorRef>>>,
+    /// Container for the consumer threads, this has both the JoinGuard to join on and the Sender
+    /// to send a terminiation message to the thread.
     consumer_threads: Arc<Mutex<Vec<ConsumerThread>>>,
+    /// Weak reference to itsemf.
     myself: Arc<Mutex<Option<Weak<ActorSystem>>>>,
 }
 
