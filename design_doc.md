@@ -52,7 +52,7 @@ struct MyActor {
 }
 
 impl Actor for MyActor {
-    fn receive(message: Message, context: &Context) -> () {
+    fn receive(message: Message, context: &ActorContext) -> () {
         match message.content() {
             case "hello".to_owned() => println!("Oh, hello there"),
             case _ => println!("Haven't your parents told you to greet people ?")
@@ -61,7 +61,8 @@ impl Actor for MyActor {
 }
 ```
 
-TODO(gamazeps): explain how to do and where to do the new.
+Note that the context is here passed as an argument, as there is no implicit conversion from an
+Actor to an ActorRef in rust (no implicit at all actually).
 
 ## Actor References
 
@@ -75,13 +76,17 @@ The actor reference structure looks like the following:
 ```rust
 struct ActorRef<T: Actor> {
     /// Whether the actor is local or not.
-    bool: is_local,
+    is_local: bool,
     /// Logical path to the actor.
     path: ActorPath,
     /// 'real' actor.
     actor_cell: ActorCell<T>,
 }
 ```
+
+ActorRef will implement a canReceive and canSend trait, that will contain the code for receiving and
+sending messages, this allows us to have futures implement the canReceive trait, and thus receive
+messages.
 
 ## Actor cell
 
@@ -93,8 +98,8 @@ struct ActorCell<T: Actor> {
     mailbox: Mailbox,
     props: Props<T>,
     actor_system: ActorSystem,
-    // TODO (be carefull about genericity here, ActorRef must not! be generic).
     parent: ActorRef<Stuff>,
+    context: ActorContext,
     actor: T
 }
 ```
@@ -146,7 +151,11 @@ thread pool, as network operations tend to be blocking).
 
 ## Futures
 
-Let the fun begin !
+In the first version (hopefully it will be improved) futures will be taken from a currently existing
+library.
+
+They will also implement the canReceive trait in order to have them act a bit like actorRef and thus
+allow the ask pattern (more detail in the actor reference and ask parts).
 
 ## Sending messages accross actors
 
@@ -164,17 +173,17 @@ once.
 The pattern is the following:
 
 ```rust
-actor_1 = actors_system.actor_of(Props::Myactor::new(), "1");
-actor_2 = actors_system.actor_of(Props::Myactor::new(), "2");
+let actor_1 = actors_system.actor_of(Props::Myactor::new(), "1");
+let actor_2 = actors_system.actor_of(Props::Myactor::new(), "2");
 
 actor_1.tell(actor_2, "Hello");
 ```
 
-Or the following:
+Or the following inside the receive function:
 
 ```rust
 impl Actor for MyActor {
-    fn receive(message: Message, context: &Context) {
+    fn receive(message: Message, context: &ActorContext) {
         match message {
             _ => context.tell(context.sender(), "Hello friend")
         }
@@ -182,21 +191,79 @@ impl Actor for MyActor {
 }
 ```
 
+We can also have:
+
+```rust
+let actor = actors_system.actor_of(Props::Myactor::new(), "1");
+tellTo(actor, "Hi");
+```
+
+Where tellTo puts the deadLetters actor (given by the system actor) as the sender.
+
 Note that we have to go through the actor context  compared to Scala, because there are no implicits
 in rust, and thus an Actor cannot be implitly casted into an ActorRef.
 
 Having done that, the message will be enqueud in the receiving actor's mailbox, and the actor will
 be enqueud in the pool actors with message to handle.
 
+Just like in akka, the context will send the the ActorRef of the Actor sending a message.
+Just like in akka, the context.sender is updated when handling a message (with the ActorRef put when
+sending the message). Note that having the actor say who sent a message allows message forwarding
+for free.
+
 ### ask
 
-The ask patter allows to get an answer from an actor in the form of a future (which can act as
-actor refs)
+The ask patter allows to get an answer from an actor in the form of a future.
+
+The ask method returns a future which will contain the answer of the request, and put the future as
+the sender of the message.
+
+This will be done by having future implement a CanReceive trait (also implemented by ActorRef) so
+that we can do the following on a future:
+
+```rust
+struct dummy: Actor {}
+
+impl Actor for dummy {
+    fn receive(message: Message, context: &ActorContext) {
+        match message {
+            _ => context.tell()(context.sender(), "I received your message")
+        }
+    }
+}
+
+let future = askTo(dummy, "Message");
+```
+
+The future will be completed when it receives a message.
+
+Note that in this version we will use an already implement version of Futures, later we will want to
+have our own to manage their thread consumption (most of the current implementation spawn a thread,
+and we do not want to have so many threads).
 
 ## Actors addressing
 
-path and non local stuff.
+If the actor reference is a reference to a local actor we do nothing special, on the other hand if
+it is not a local actor, the message is send passed to a remoting actor in the system actor.
+
+The remoting actor will then forward this message to an actor that has a TCP socket open to the
+machine indicated in the ActorPath of the target ActorRef.
+If none exists it will create such an Actor.
+
+Note: having a stash (not sure if it will be implemented in the v1 of RobotS) would allow to create
+such an actor and send him the message directly afterwards, this way we do not have to wait for the
+socket to be open and thus much asynchronicity is gained.
+
+Before sending the message through the socket, the socket actor will updtae the sender informations
+on the message to inform the receiving actor on how to answer (update the path and sets the actor as
+non local).
 
 ## Remoting
 
-Actors have TCP socket, everything is actors.
+Sending message to remote actor systems is done with a TCP socket (tcp is chosen in order to
+guarantee that messages send by the an actor A to an ActorRef B are received in the order they are
+sent).
+
+Receiving messages is done the same way with a TCP socket, the actorRef of the receiver of the
+message is created with an identify request (the sender cannnot have a local refernce to this actor
+and it thus has to be created).
