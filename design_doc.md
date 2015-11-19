@@ -35,15 +35,15 @@ impl Props<T> {}
 actor_ref = actor_system.actor_of(Props::MyActor::new(), "my_actor");
 ```
 
-An instance of the actor is then created using either actor\_system.actor\_of(props, name) or
-with self.actor\_context().actor\_of(props, name), the first one create a top level user actor
-and the second one creates a child of the actor's whose actor\_context is called.
+An instance of the actor is then created using either actor_system.actor_of(props, name) or
+with context.actor_of(props, name), the first one create a top level user actor
+and the second one creates a child of the actor's whose context is called.
 This gives us a reference to the newly created actor.
 
 ## Actors Implementation
 
 In order to implement a new `Actor`, it is necessary to create a `struct` with the attributes of
-the actor (is any) and to implement the `Actor` trait for that struct. Note that only the `receive`
+the actor (if any) and to implement the `Actor` trait for that struct. Note that only the `receive`
 method has to be implemented.
 
 ```rust
@@ -67,7 +67,7 @@ Actor to an ActorRef in rust (no implicit at all actually).
 ## Actor References
 
 Just like the actor model imposes, we never manipulate actors, but actor references instead :
-  - Sending messages is done by sending addresing the actor with its reference.
+  - Sending messages is done by sending to the actor's reference.
   - Creating an actor gives out a reference to this actor.
 
 The actor reference structure looks like the following:
@@ -132,11 +132,11 @@ system.
 
 All actors created by the user are its children.
 
-Calling actor_system.actor_of(props, name) will actually call user_actor.actor_context().actor_of(props, name).
+Calling actor_system.actor_of(props, name) will actually have the user actor create it.
 
 This actor is the one responsible for creating the thread pool that will handle the user actors.
-This is done this way so that each hierarchy can spawn its own actors, and not having a shared pool
-for all actors, this way the system actors (in the system actor's hierarchy) can have there own
+This is done this way so that each hierarchy can spawn its own threads, and not having a shared pool
+for all actors, this way the system actors (in the system actor's hierarchy) can have their own
 thread pool to handle sockets (for remoting), dead letters (for logging), path queries (for getting
 an ActorRef from a path), etc...
 
@@ -162,7 +162,7 @@ allow the ask pattern (more detail in the actor reference and ask parts).
 The main (and recommanded) way to have actors commmunicate with each other is the use of the tell
 function on actor references.
 
-If an anwser is desired and that it cannot be done by having it send with a send, the ask pattern
+If an anwser is desired and that it cannot be done by having it sent with a send, the ask pattern
 can be used.
 
 ### tell
@@ -179,6 +179,13 @@ let actor_2 = actors_system.actor_of(Props::Myactor::new(), "2");
 actor_1.tell(actor_2, "Hello");
 ```
 
+We can also have:
+
+```rust
+let actor = actors_system.actor_of(Props::Myactor::new(), "1");
+tellTo(actor, "Hi");
+```
+
 Or the following inside the receive function:
 
 ```rust
@@ -191,29 +198,24 @@ impl Actor for MyActor {
 }
 ```
 
-We can also have:
-
-```rust
-let actor = actors_system.actor_of(Props::Myactor::new(), "1");
-tellTo(actor, "Hi");
-```
-
 Where tellTo puts the deadLetters actor (given by the system actor) as the sender.
 
 Note that we have to go through the actor context  compared to Scala, because there are no implicits
 in rust, and thus an Actor cannot be implitly casted into an ActorRef.
 
 Having done that, the message will be enqueud in the receiving actor's mailbox, and the actor will
-be enqueud in the pool actors with message to handle.
+be enqueud in the pool (usually the user actor's pool) of actors with message to handle.
 
-Just like in akka, the context will send the the ActorRef of the Actor sending a message.
+Just like in akka, the context will send the ActorRef of the Actor sending a message.
+
 Just like in akka, the context.sender is updated when handling a message (with the ActorRef put when
-sending the message). Note that having the actor say who sent a message allows message forwarding
-for free.
+sending the message).
+
+Note that having the actor say who sent a message allows message forwarding for free.
 
 ### ask
 
-The ask patter allows to get an answer from an actor in the form of a future.
+The ask pattern allows to get an answer from an actor in the form of a future.
 
 The ask method returns a future which will contain the answer of the request, and put the future as
 the sender of the message.
@@ -254,16 +256,25 @@ Note: having a stash (not sure if it will be implemented in the v1 of RobotS) wo
 such an actor and send him the message directly afterwards, this way we do not have to wait for the
 socket to be open and thus much asynchronicity is gained.
 
-Before sending the message through the socket, the socket actor will updtae the sender informations
+Before sending the message through the socket, the socket actor will update the sender informations
 on the message to inform the receiving actor on how to answer (update the path and sets the actor as
 non local).
 
 ## Remoting
 
-Sending message to remote actor systems is done with a TCP socket (tcp is chosen in order to
-guarantee that messages send by the an actor A to an ActorRef B are received in the order they are
-sent).
+Sending message to remote actor systems is done with a TCP socket as explained above(tcp is chosen
+in order to guarantee that messages send by the an actor A to an ActorRef B are received in the
+order they are sent).
 
 Receiving messages is done the same way with a TCP socket, the actorRef of the receiver of the
 message is created with an identify request (the sender cannnot have a local refernce to this actor
 and it thus has to be created).
+
+## Getting an ActorRef from an ActorPath
+
+This will be done exactly as in akka.
+
+## Actor supervision
+
+This will be done exactly as in akka with the same preStart, postStop, preRestart and postRestart
+methods.
